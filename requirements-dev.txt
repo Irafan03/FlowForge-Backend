@@ -1,0 +1,13 @@
+# Development / test dependencies (not installed in production image)
+-r requirements.txt
+
+# ── Testing ────────────────────────────────────────────────────────────────────
+pytest==8.3.2
+pytest-asyncio==0.23.8
+pytest-cov==5.0.0
+
+# ── Test DB ────────────────────────────────────────────────────────────────────
+# Tests use SQLite in-memory for unit tests and a real PG for integration tests.
+
+# ── Linting / formatting ───────────────────────────────────────────────────────
+ruff==0.5.5
