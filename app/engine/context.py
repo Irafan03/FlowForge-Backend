@@ -8,8 +8,8 @@ The context lives entirely in worker memory and is NOT persisted as-is.
 Individual node outputs are persisted to node_executions by the runner.
 """
 
-import uuid
 import re
+import uuid
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -37,7 +37,11 @@ class ExecutionContext:
         # Set of node IDs that should be skipped (wrong branch)
         self._skipped_nodes: set[str] = set()
 
-    def get_credential(self, credential_id: str, expected_type: str | None = None) -> dict[str, Any]:
+    def get_credential(
+        self,
+        credential_id: str,
+        expected_type: str | tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
         """Return decrypted credential data only when it belongs to this execution's user."""
         if self.db is None or self.user_id is None:
             raise ValueError("Credential access is unavailable outside an authenticated execution")
@@ -49,7 +53,10 @@ class ExecutionContext:
         except (ValueError, TypeError) as exc:
             raise ValueError("Credential not found") from exc
         credential = credential_repo.get_by_id(self.db, parsed_id, self.user_id)
-        if credential is None or (expected_type and credential.type != expected_type):
+        allowed_types = (
+            (expected_type,) if isinstance(expected_type, str) else expected_type
+        )
+        if credential is None or (allowed_types and credential.type not in allowed_types):
             raise ValueError("Credential not found")
         return decrypt_data(credential.encrypted_data)
 

@@ -96,7 +96,7 @@ Un workflow stocke son graphe dans un champ `graph` de type JSONB en PostgreSQL.
 |---|---|---|
 | `manual_trigger` | Déclenchement via API | `{}` |
 | `webhook_trigger` | Réception d'une requête HTTP | `{"method": "POST"}` |
-| `schedule_trigger` | Déclenchement cron | `{"cron": "0 9 * * *", "timezone": "Europe/Paris"}` |
+| `schedule_trigger` | Déclenchement cron | `{"cron": "0 9 * * *", "timezone": "Europe/Paris"}` (`timezone` optionnel, défaut `UTC`) |
 | `gmail_trigger` | Nouveau mail Gmail | `{"credential_id": "cred_...", "filter": "..."}` |
 | `telegram_trigger` | Message Telegram reçu | `{"credential_id": "cred_..."}` |
 
@@ -474,6 +474,45 @@ Par défaut, si un nœud échoue, **l'exécution entière est marquée `failed`*
 Les retries ne seront implémentés qu'après validation du chemin minimal Manual → HTTP Request.
 
 ---
+
+## Cycle de vie du Schedule Trigger
+
+Le nœud `schedule_trigger` stocke sa configuration dans `graph.nodes[].config` avec
+`cron` (expression cron à cinq champs, par exemple `0 9 * * 1`) et `timezone` (nom IANA, par exemple
+`Europe/Paris`). `timezone` est optionnel et vaut `UTC` en son absence. Le backend
+valide les deux champs à la création et à chaque mise à jour du graphe ; une
+expression cron ou un fuseau invalide produit une réponse HTTP 422.
+
+Le backend conserve aussi une ligne unique dans `triggers` par workflow. Elle
+reprend la configuration d'origine dans `config` et renseigne les colonnes
+`cron_expression`, `timezone` et `next_run_at`. Remplacer le type du trigger
+réutilise cette ligne et efface les champs propres au Schedule. Supprimer le
+trigger Schedule du graphe le remplace par le nouveau type de trigger. La ligne
+et le graphe sont écrits dans la même transaction. Activer un workflow active
+son trigger et recalcule sa prochaine occurrence à partir de l'heure courante ;
+le désactiver suspend le polling sans supprimer le planning.
+
+`next_run_at` est conservé en UTC (`TIMESTAMPTZ`). Le calcul cron utilise l'heure
+civile du fuseau IANA, puis convertit l'occurrence en UTC. Lors du retour à
+l'heure d'hiver, un créneau local ambigu (par exemple 02:30 à Paris) est exécuté
+une seule fois ; au passage à l'heure d'été, un créneau inexistant est résolu par
+`croniter` vers la prochaine heure civile représentable. Le worker interroge
+chaque minute les triggers arrivés à échéance dont le workflow est actif. Il
+verrouille les lignes avec `FOR UPDATE SKIP LOCKED` et envoie d'abord l'exécution
+par le service ARQ commun, avec une clé d'idempotence stable basée sur le trigger
+et l'occurrence UTC. Il avance ensuite `next_run_at` de façon conditionnelle.
+Deux pollers peuvent donc reprendre la même échéance sans créer plusieurs
+exécutions ou jobs ARQ. Si l'enqueue échoue, l'exécution `queued` reste persistée,
+le planning reste dû et le prochain poll retente le même job idempotent. Si
+plusieurs occurrences sont manquées pendant l'arrêt du worker, une seule
+exécution est créée au redémarrage et le calendrier repart à la prochaine
+occurrence future.
+
+Les tests unitaires du calendrier et du polling sont isolés avec SQLite en
+mémoire. Les tests d'intégration du cycle de vie exigent un PostgreSQL dédié
+`flowforge_test` via `TEST_DATABASE_URL` (voir `docs/TESTING.md`). Le polling du
+worker s'exécute sans Redis dans ces tests par remplacement du service d'enqueue ;
+un E2E ARQ/Redis requiert séparément Redis sur `127.0.0.1:6380`.
 
 ## Contraintes de sécurité
 

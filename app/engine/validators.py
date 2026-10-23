@@ -120,6 +120,13 @@ def validate_graph(graph: dict[str, Any]) -> None:
                     f"Node '{node['id']}' (type={node['type']!r}) is missing "
                     f"required config field: '{field}'"
                 )
+        if node["type"] == "http_request":
+            credential_id = config.get("credential_id")
+            credential_type = config.get("credential_type")
+            if credential_id and credential_type not in {"api_key", "http_header"}:
+                _fail("HTTP Request credential_type must be 'api_key' or 'http_header'")
+            if credential_type and not credential_id:
+                _fail("HTTP Request credential_type requires credential_id")
         if node["type"] == "telegram_trigger":
             _validate_telegram_trigger_config(node["id"], config)
 

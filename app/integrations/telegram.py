@@ -2,11 +2,33 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from typing import Any
 
 import httpx
 
 from app.engine.node_executor import NodeExecutionError
+
+
+_TELEGRAM_BOT_URL = re.compile(r"(https://api\.telegram\.org/bot)[^/]+(/)")
+
+
+class _RedactTelegramTokenFilter(logging.Filter):
+    """Prevent HTTPX's request log from exposing the Bot API token in its URL."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        redacted = _TELEGRAM_BOT_URL.sub(r"\1[REDACTED]\2", message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
+_httpx_logger = logging.getLogger("httpx")
+if not any(isinstance(item, _RedactTelegramTokenFilter) for item in _httpx_logger.filters):
+    _httpx_logger.addFilter(_RedactTelegramTokenFilter())
 
 
 def _call(token: str, method: str, payload: dict[str, Any] | None = None) -> Any:

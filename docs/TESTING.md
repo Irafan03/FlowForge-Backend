@@ -360,6 +360,10 @@ pytest tests/unit/ -v
 # Tests d'intégration uniquement
 pytest tests/integration/ -v
 
+# Cycle Schedule : unitaires (SQLite mémoire) et intégration (PostgreSQL flowforge_test)
+pytest tests/unit/test_schedule_lifecycle.py -v
+TEST_DATABASE_URL=postgresql://flowforge_test:flowforge_test_password@127.0.0.1:5433/flowforge_test pytest tests/integration/test_schedule_lifecycle.py -v
+
 # Un fichier spécifique
 pytest tests/unit/test_engine.py -v
 
@@ -392,3 +396,12 @@ pytest -v -s
 
 > Aucun test n'existe à ce jour. Ce document sera mis à jour au fur et à mesure de l'implémentation.
 > La règle est : **tout code fusionné doit avoir des tests qui passent.**
+
+### Phase 7B — Schedule Trigger
+
+Le test d'intégration du cycle Schedule refuse toute base autre que `flowforge_test`
+sur un endpoint PostgreSQL de test autorisé par `tests/conftest.py`. Ne définissez
+`TEST_DATABASE_URL` que pour cette base dédiée. Les tests unitaires restent sur
+SQLite mémoire. L'E2E Redis/ARQ, lorsqu'il est disponible, doit utiliser
+`REDIS_URL=redis://127.0.0.1:6380/1` ; le polling unitaire remplace l'enqueue et
+n'ouvre aucune connexion Redis.

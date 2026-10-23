@@ -102,9 +102,53 @@ def _handle_if_condition(
 def _handle_http_request(
     node: dict, config: dict, context: ExecutionContext
 ) -> dict[str, Any]:
-    """Delegates to app.integrations.http_request — includes SSRF protection."""
+    """Resolve an owned HTTP credential, then dispatch through the SSRF-safe client."""
     from app.integrations.http_request import execute_http_request
-    return execute_http_request(config)
+
+    resolved = dict(config)
+    credential_id = resolved.pop("credential_id", None)
+    credential_type = resolved.pop("credential_type", None)
+    api_key_header = resolved.pop("api_key_header", "Authorization")
+    api_key_prefix = resolved.pop("api_key_prefix", "Bearer ")
+    secret_values: list[str] = []
+    headers = dict(resolved.get("headers") or {})
+
+    if credential_id:
+        if credential_type not in ("api_key", "http_header"):
+            raise NodeExecutionError("http_request: invalid credential type")
+        data = context.get_credential(
+            credential_id, ("api_key", "http_header")
+        )
+        if credential_type == "http_header":
+            if not data or any(
+                not isinstance(name, str) or not isinstance(value, str)
+                for name, value in data.items()
+            ):
+                raise NodeExecutionError(
+                    "http_request: HTTP Header credential must contain string header names and values"
+                )
+            headers.update(data)
+            secret_values.extend(data.values())
+        else:
+            api_key = data.get("api_key")
+            if not isinstance(api_key, str) or not api_key:
+                raise NodeExecutionError(
+                    "http_request: API Key credential must contain a non-empty 'api_key' value"
+                )
+            if not isinstance(api_key_header, str) or not api_key_header.strip():
+                raise NodeExecutionError(
+                    "http_request: 'api_key_header' must be a non-empty header name"
+                )
+            if not isinstance(api_key_prefix, str):
+                raise NodeExecutionError(
+                    "http_request: 'api_key_prefix' must be a string"
+                )
+            headers[api_key_header] = f"{api_key_prefix}{api_key}"
+            secret_values.extend((api_key, f"{api_key_prefix}{api_key}"))
+
+    if headers:
+        resolved["headers"] = headers
+    return execute_http_request(resolved, secret_values=secret_values)
 
 
 def _handle_gmail_send(
@@ -136,7 +180,10 @@ def _handle_telegram_send(
 def _handle_ml_prediction(
     node: dict, config: dict, context: ExecutionContext
 ) -> dict[str, Any]:
-    raise NodeExecutionError("ml_prediction is not implemented in Phase 1")
+    """Call the configured FlowForge ML inference service."""
+    from app.integrations.ml_prediction import execute_ml_prediction
+
+    return execute_ml_prediction(config)
 
 
 def _handle_gmail_trigger(

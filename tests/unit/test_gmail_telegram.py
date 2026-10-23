@@ -284,7 +284,7 @@ def test_google_callback_consumes_oauth_state_once(monkeypatch):
             pass
 
     db = _Db()
-    settings = SimpleNamespace(GOOGLE_CLIENT_ID="client", GOOGLE_CLIENT_SECRET="secret")
+    settings = SimpleNamespace(GOOGLE_CLIENT_ID="client", GOOGLE_CLIENT_SECRET="secret", FRONTEND_URL="http://localhost:5173")
     monkeypatch.setattr(api, "get_settings", lambda: settings)
     monkeypatch.setattr(api, "_serializer", lambda: SimpleNamespace(loads=lambda *_a, **_k: {"user_id": str(user_id), "nonce": "nonce"}))
     monkeypatch.setattr("app.repositories.user_repo.get_by_id", lambda *_args: user)
@@ -293,11 +293,14 @@ def test_google_callback_consumes_oauth_state_once(monkeypatch):
     saved = {}
     monkeypatch.setattr("app.repositories.credential_repo.create", lambda _db, **kwargs: saved.update(kwargs))
 
-    result = api.google_callback("auth-code", "signed-state", db)
-    assert result == {"connected": True}
+    result = api.google_callback("auth-code", "signed-state", error=None, db=db)
+    assert result.status_code == 200
+    assert "flowforge:google-oauth" in result.body.decode()
+    assert '"status": "connected"' in result.body.decode()
+    assert "refresh" not in result.body.decode()
     assert saved["type"] == "oauth2_google"
     assert saved["encrypted_data"] == b"encrypted"
-    assert "refresh_token" not in result
+    assert "refresh_token" not in result.body.decode()
     with pytest.raises(HTTPException) as error:
-        api.google_callback("auth-code", "signed-state", db)
+        api.google_callback("auth-code", "signed-state", error=None, db=db)
     assert error.value.status_code == 400

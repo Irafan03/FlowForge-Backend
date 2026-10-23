@@ -15,6 +15,7 @@ and unit tests without an event loop.
 from __future__ import annotations
 
 import ipaddress
+import re
 import socket
 from typing import Any
 from urllib.parse import urlparse
@@ -28,9 +29,13 @@ _MAX_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MB
 _ALLOWED_SCHEMES = {"http", "https"}
 
 _ALLOWED_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+_SENSITIVE_NAME_RE = re.compile(r"(?:authorization|authentication-info|proxy-authenticate|proxy-authorization|www-authenticate|token|secret|password|cookie|api[-_]?key)", re.IGNORECASE)
 
 
-def execute_http_request(config: dict[str, Any]) -> dict[str, Any]:
+def execute_http_request(
+    config: dict[str, Any], *, secret_values: list[str] | None = None
+) -> dict[str, Any]:
     """
     Perform an HTTP request described by *config*.
 
@@ -64,13 +69,27 @@ def execute_http_request(config: dict[str, Any]) -> dict[str, Any]:
 
     # ── Build request ─────────────────────────────────────────────────────────
     headers: dict[str, str] = dict(config.get("headers") or {})
+    for name, value in headers.items():
+        if (
+            not isinstance(name, str)
+            or not _HEADER_NAME_RE.fullmatch(name)
+            or not isinstance(value, str)
+            or "\r" in value
+            or "\n" in value
+        ):
+            raise NodeExecutionError("http_request: invalid request header")
+        try:
+            value.encode("latin-1")
+        except UnicodeEncodeError:
+            raise NodeExecutionError("http_request: invalid request header") from None
     params: dict[str, str] | None = config.get("params") or None
     body = config.get("body")
     timeout = min(int(config.get("timeout") or _REQUEST_TIMEOUT_SECONDS), _REQUEST_TIMEOUT_SECONDS)
 
     try:
         with httpx.Client(
-            follow_redirects=True,
+            # Do not forward authenticated headers to a redirect target.
+            follow_redirects=not bool(secret_values),
             max_redirects=5,
             timeout=httpx.Timeout(timeout),
         ) as client:
@@ -110,10 +129,16 @@ def execute_http_request(config: dict[str, Any]) -> dict[str, Any]:
             except Exception:
                 response_body = response.text
 
+            safe_headers = {
+                name: value
+                for name, value in response.headers.items()
+                if not _SENSITIVE_NAME_RE.search(name)
+            }
+            secrets = [value for value in (secret_values or []) if value]
             return {
                 "status_code": response.status_code,
-                "headers": dict(response.headers),
-                "body": response_body,
+                "headers": _redact_secrets(safe_headers, secrets),
+                "body": _redact_secrets(response_body, secrets),
                 "ok": response.is_success,
             }
 
@@ -121,6 +146,26 @@ def execute_http_request(config: dict[str, Any]) -> dict[str, Any]:
         raise NodeExecutionError(f"http_request: request timed out after {timeout}s") from exc
     except httpx.RequestError as exc:
         raise NodeExecutionError(f"http_request: network error — {exc}") from exc
+
+
+def _redact_secrets(value: Any, secrets: list[str]) -> Any:
+    """Remove exact credential values from response data persisted in history."""
+    if isinstance(value, str):
+        for secret in secrets:
+            value = value.replace(secret, "[REDACTED]")
+        return value
+    if isinstance(value, list):
+        return [_redact_secrets(item, secrets) for item in value]
+    if isinstance(value, dict):
+        sanitized = {}
+        for key, item in value.items():
+            safe_key = _redact_secrets(key, secrets) if isinstance(key, str) else key
+            if isinstance(key, str) and _SENSITIVE_NAME_RE.search(key):
+                sanitized[safe_key] = "[REDACTED]"
+            else:
+                sanitized[safe_key] = _redact_secrets(item, secrets)
+        return sanitized
+    return value
 
 
 # ── SSRF protection ────────────────────────────────────────────────────────────

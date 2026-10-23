@@ -1,6 +1,10 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from croniter import croniter
+from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -48,7 +52,11 @@ def create(
     db.add(workflow)
     # Assign the generated UUID and persist the parent row before creating its trigger.
     db.flush()
-    _sync_poll_trigger(db, workflow, graph)
+    try:
+        _sync_poll_trigger(db, workflow, graph)
+    except Exception:
+        db.rollback()
+        raise
     db.commit()
     db.refresh(workflow)
     return workflow
@@ -58,7 +66,11 @@ def update(db: Session, workflow: Workflow, data: dict[str, Any]) -> Workflow:
     for field, value in data.items():
         setattr(workflow, field, value)
     if "graph" in data:
-        _sync_poll_trigger(db, workflow, data["graph"])
+        try:
+            _sync_poll_trigger(db, workflow, data["graph"])
+        except Exception:
+            db.rollback()
+            raise
     db.commit()
     db.refresh(workflow)
     return workflow
@@ -72,29 +84,71 @@ def delete(db: Session, workflow: Workflow) -> None:
 def set_active(db: Session, workflow: Workflow, is_active: bool) -> Workflow:
     workflow.is_active = is_active
     trigger = db.query(Trigger).filter(Trigger.workflow_id == workflow.id).first()
-    if trigger and trigger.type in (TriggerType.GMAIL, TriggerType.TELEGRAM):
+    if trigger:
         trigger.is_active = is_active
+        if is_active and trigger.type == TriggerType.SCHEDULE:
+            from app.triggers.schedule import compute_next_run
+
+            trigger.next_run_at = compute_next_run(
+                trigger.cron_expression or (trigger.config or {}).get("cron", ""),
+                datetime.now(UTC),
+                trigger.timezone,
+            )
     db.commit()
     db.refresh(workflow)
     return workflow
 
 
 def _sync_poll_trigger(db: Session, workflow: Workflow, graph: dict[str, Any]) -> None:
-    """Keep the durable poll-trigger row aligned with Gmail/Telegram graph nodes."""
+    """Keep durable trigger rows aligned with their graph nodes."""
     node = next(
-        (n for n in graph.get("nodes", []) if n.get("type") in ("gmail_trigger", "telegram_trigger")),
+        (
+            n for n in graph.get("nodes", [])
+            if n.get("type") in (
+                "schedule_trigger",
+                "gmail_trigger",
+                "telegram_trigger",
+                "webhook_trigger",
+            )
+        ),
         None,
     )
     existing = db.query(Trigger).filter(Trigger.workflow_id == workflow.id).first()
-    if node is None:
-        if existing and existing.type in (TriggerType.GMAIL, TriggerType.TELEGRAM):
+    if node is None:  # validate_graph normally prevents this
+        if existing and existing.type in (
+            TriggerType.SCHEDULE,
+            TriggerType.GMAIL,
+            TriggerType.TELEGRAM,
+            TriggerType.WEBHOOK,
+        ):
             db.delete(existing)
         return
 
-    trigger_type = TriggerType.GMAIL if node["type"] == "gmail_trigger" else TriggerType.TELEGRAM
+    trigger_type = TriggerType(node["type"])
     config = dict(node.get("config") or {})
     if trigger_type == TriggerType.TELEGRAM:
         config.setdefault("polling_interval_seconds", 60)
+    cron_expression = timezone_name = None
+    next_run_at = None
+    webhook_token = None
+    if trigger_type == TriggerType.SCHEDULE:
+        cron_expression, timezone_name = _validate_schedule_config(config)
+        from app.triggers.schedule import compute_next_run
+
+        next_run_at = compute_next_run(
+            cron_expression, datetime.now(UTC), timezone_name
+        )
+    elif trigger_type == TriggerType.WEBHOOK:
+        webhook_token = (
+            existing.webhook_token
+            if existing and existing.type == TriggerType.WEBHOOK
+            else None
+        ) or str(uuid.uuid4())
+    previous_webhook_secret = (
+        existing.webhook_secret
+        if existing and existing.type == TriggerType.WEBHOOK
+        else None
+    )
     if existing and existing.type == trigger_type:
         old_config = dict(existing.config or {})
         if old_config.get("credential_id") == config.get("credential_id"):
@@ -111,4 +165,41 @@ def _sync_poll_trigger(db: Session, workflow: Workflow, graph: dict[str, Any]) -
     else:
         existing.type = trigger_type
         existing.config = config
-        existing.is_active = workflow.is_active
+    existing.is_active = workflow.is_active
+    existing.webhook_token = webhook_token
+    existing.webhook_secret = (
+        previous_webhook_secret if trigger_type == TriggerType.WEBHOOK else None
+    )
+    existing.cron_expression = cron_expression
+    existing.timezone = timezone_name
+    existing.next_run_at = next_run_at
+
+
+def _validate_schedule_config(config: dict[str, Any]) -> tuple[str, str]:
+    cron_expression = config.get("cron")
+    timezone_name = config.get("timezone", "UTC")
+    if timezone_name is None:
+        timezone_name = "UTC"
+    if (
+        not isinstance(cron_expression, str)
+        or len(cron_expression.split()) != 5
+        or not croniter.is_valid(cron_expression)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Schedule Trigger requires a valid five-field 'cron' expression",
+        )
+    if not isinstance(timezone_name, str):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Schedule Trigger 'timezone' must be a valid IANA timezone",
+        )
+    try:
+        if timezone_name != "UTC":
+            ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid Schedule Trigger timezone: {timezone_name}",
+        ) from None
+    return cron_expression, timezone_name

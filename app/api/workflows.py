@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.engine.validators import validate_graph
+from app.models.trigger import Trigger, TriggerType
 from app.models.user import User
 from app.repositories import workflow_repo
 from app.schemas.workflow import (
@@ -26,6 +27,7 @@ from app.schemas.workflow import (
     WorkflowList,
     WorkflowRead,
     WorkflowUpdate,
+    WorkflowWebhookURLRead,
 )
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -86,6 +88,34 @@ def get_workflow(
     if not workflow:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
     return workflow  # type: ignore[return-value]
+
+
+@router.get(
+    "/{workflow_id}/webhook-url",
+    response_model=WorkflowWebhookURLRead,
+    summary="Get the webhook path for a workflow",
+)
+def get_workflow_webhook_url(
+    workflow_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> WorkflowWebhookURLRead:
+    workflow = workflow_repo.get_by_id(db, workflow_id, current_user.id)
+    if not workflow:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+
+    trigger = (
+        db.query(Trigger)
+        .filter(
+            Trigger.workflow_id == workflow.id,
+            Trigger.type == TriggerType.WEBHOOK,
+        )
+        .first()
+    )
+    if not trigger or not trigger.webhook_token:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Webhook trigger not found")
+
+    return WorkflowWebhookURLRead(webhook_path=f"webhooks/{trigger.webhook_token}")
 
 
 @router.put(

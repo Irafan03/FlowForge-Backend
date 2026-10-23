@@ -48,3 +48,9 @@ class WorkflowActivationRead(BaseModel):
     is_active: bool
 
     model_config = {"from_attributes": True}
+
+
+class WorkflowWebhookURLRead(BaseModel):
+    """Webhook path relative to the configured API base URL."""
+
+    webhook_path: str

@@ -36,42 +36,15 @@ Aucune configuration externe requise. Le trigger reçoit optionnellement un `inp
 
 ---
 
-## Webhook Trigger ⬜
+## Webhook Trigger
 
-Expose une URL HTTP unique permettant à un système externe de déclencher un workflow.
+Un n?ud `webhook_trigger` dans le graphe provisionne un token UUID v4 opaque et stable lors de la cr?ation du workflow. Le token n'est pas plac? dans le graphe.
 
-**URL générée :** `POST /webhooks/{webhook_token}`
-
-**Config du nœud :**
-```json
-{
-  "type": "webhook_trigger",
-  "config": {
-    "method": "POST",
-    "secret_header": "X-Webhook-Secret"
-  }
-}
-```
-
-**Output :**
-```json
-{
-  "method": "POST",
-  "headers": { "content-type": "application/json" },
-  "body": { "event": "user.created", "user_id": "123" },
-  "query_params": {}
-}
-```
-
-**Sécurité prévue :**
-- Le `webhook_token` est un UUID v4 généré à la création du trigger, non prévisible.
-- Option : validation d'un secret partagé (`X-Webhook-Secret`) en HMAC-SHA256.
-- Le workflow doit être actif (`is_active=true`) pour accepter les requêtes.
-- Rate limiting prévu : 100 requêtes/minute par token.
-
-**Variable d'environnement :** aucune spécifique. Le token est stocké en base.
-
----
+- `GET /workflows/{workflow_id}/webhook-url` (authentifi?, propri?taire uniquement) retourne `webhook_path`, relatif ? la base `/api/v1` configur?e.
+- `POST /webhooks/{token}` est public et transmet le payload JSON comme `input_data` ? une ex?cution du workflow.
+- Le workflow doit ?tre actif. L'API retourne `409` lorsqu'il est inactif.
+- Le token est une capacit? secr?te : conserver l'URL priv?e.
+- Aucune configuration de signature HMAC n'est actuellement expos?e dans le workflow; ne pas documenter l'option comme disponible.
 
 ## Schedule Trigger ⬜
 
@@ -111,67 +84,50 @@ Déclenche un workflow automatiquement selon une expression cron.
 
 ---
 
-## HTTP Request ⬜
+## HTTP Request
 
-Effectue une requête HTTP sortante vers n'importe quelle URL externe.
+Effectue une requete HTTP sortante. La protection SSRF bloque les adresses privees, loopback, link-local, reservees et les schemas autres que HTTP(S). Les requetes avec credential ne suivent pas les redirections afin de ne pas transmettre le credential a un autre hote.
 
-**Config du nœud :**
+### Configuration sans authentification
+
 ```json
 {
   "type": "http_request",
   "config": {
     "url": "https://api.example.com/data",
-    "method": "POST",
-    "headers": {
-      "Content-Type": "application/json",
-      "Authorization": "Bearer {{credentials.api_key}}"
-    },
-    "body": {
-      "user_id": "{{trigger.input_data.user_id}}"
-    },
-    "timeout_seconds": 30
+    "method": "GET",
+    "headers": { "Accept": "application/json" },
+    "timeout": 30
   }
 }
 ```
 
-**Méthodes supportées :** GET, POST, PUT, PATCH, DELETE.
+### Credential API Key
 
-**Output :**
+Creer un credential `api_key` dont les donnees sont `{"api_key":"<secret>"}`. Ces donnees sont chiffrees a la persistance et ne sont jamais renvoyees par l'API. Le graphe conserve uniquement la reference et les parametres non secrets du header :
+
 ```json
 {
-  "status_code": 200,
-  "headers": { "content-type": "application/json" },
-  "body": { "result": "ok" },
-  "duration_ms": 312
+  "credential_id": "<credential UUID>",
+  "credential_type": "api_key",
+  "api_key_header": "Authorization",
+  "api_key_prefix": "Bearer "
 }
 ```
 
-### Protection SSRF ⬜
+Le header par defaut est `Authorization: Bearer <api_key>`. `api_key_header` et `api_key_prefix` peuvent etre adaptes au service cible.
 
-La protection SSRF (Server-Side Request Forgery) est **obligatoire** et doit être implémentée avant tout déploiement.
+### Credential HTTP Header
 
-**Règles de blocage prévues :**
+Creer un credential `http_header` dont les donnees sont une carte de noms de headers vers leurs valeurs secretes, par exemple `{"X-API-Key":"<secret>"}`. Le graphe contient seulement `credential_id` et `credential_type: "http_header"`. Les headers du credential remplacent ceux de meme nom saisis dans la configuration du noeud.
 
-| Catégorie | Exemples bloqués |
-|---|---|
-| Plages IP privées RFC 1918 | `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` |
-| Loopback | `127.0.0.1`, `::1`, `localhost` |
-| Link-local | `169.254.0.0/16` (AWS metadata) |
-| Métadonnées cloud | `169.254.169.254` (AWS IMDSv1), `metadata.google.internal` |
-| Schémas non-HTTP | `file://`, `ftp://`, `gopher://` |
+Les secrets doivent etre ajoutes dans Credentials, jamais dans le graphe. Le worker verifie que le credential appartient au proprietaire du workflow et que son type correspond a la reference.
 
-**Algorithme prévu :**
-1. Parser l'URL → extraire le hostname
-2. Résoudre le hostname en IP (DNS lookup)
-3. Vérifier l'IP contre la liste de blocage
-4. Si bloqué → `NodeExecutionError("SSRF protection: blocked IP range")`
-5. Suivre les redirections → revérifier chaque IP intermédiaire
+### Sortie et protection des secrets
 
-> ⚠️ **Non implémenté** — Sans cette protection, un attaquant peut atteindre des services internes. Bloquer impérativement avant mise en production.
+La sortie contient `status_code`, les headers non sensibles, `body` et `ok`. Les headers d'authentification, cookies, tokens et cles sont exclus. Les champs de reponse portant des noms sensibles et toute valeur exacte du credential sont remplaces par `[REDACTED]` avant persistance dans l'historique.
 
-**Bibliothèque recommandée :** `httpx` avec hook de validation pré-requête.
-
----
+Methodes supportees : GET, POST, PUT, PATCH, DELETE, HEAD et OPTIONS. Le timeout est borne a 30 secondes et la reponse a 10 MB.
 
 ## Gmail OAuth 2.0 ⬜
 
@@ -225,36 +181,15 @@ Surveille une boîte Gmail et déclenche le workflow à chaque nouvel email corr
 { "message_id": "18abc...", "sent_at": "2026-10-16T19:00:01Z" }
 ```
 
-### Flux OAuth 2.0 prévu
+### Flux OAuth 2.0
 
-```
-1. Utilisateur → GET /integrations/google/auth
-   → Redirect vers Google OAuth consent screen
+La SPA appelle `GET /integrations/google/auth-url` avec le Bearer de session. Le backend cree un nonce persistant, signe `state`, puis retourne l'URL Google. Le frontend l'ouvre dans une popup afin de conserver sa session en memoire. Le callback consomme le nonce une seule fois, echange le code, chiffre access/refresh tokens, enregistre un credential `oauth2_google`, puis renvoie uniquement un statut popup via `postMessage` vers l'origine configuree dans `FRONTEND_URL`.
 
-2. Google → GET /integrations/google/callback?code=...
-   → Échange code contre access_token + refresh_token
-   → Chiffrement Fernet des tokens
-   → Stockage en Credential (type=oauth2_google)
+L'ancien `GET /integrations/google/auth` reste disponible comme redirection navigateur. La SPA utilise `auth-url` car la navigation directe ne peut pas joindre le Bearer en memoire.
 
-3. Lors de l'exécution du nœud Gmail :
-   → Déchiffrement du credential
-   → Si access_token expiré → refresh automatique
-   → Appel Gmail API v1
-```
+Variables requises : `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` et `FRONTEND_URL`. Le callback `GOOGLE_REDIRECT_URI` doit correspondre a l'URL autorisee cote Google. Les scopes demandes sont `gmail.readonly` et `gmail.send`; `access_type=offline` et `prompt=consent` sont utilises pour obtenir un refresh token.
 
-**Variables d'environnement requises :**
-- `GOOGLE_CLIENT_ID`
-- `GOOGLE_CLIENT_SECRET`
-- `GOOGLE_REDIRECT_URI` (ex. `https://api.flowforge.ai/integrations/google/callback`)
-
-**Scopes OAuth requis :**
-- `https://www.googleapis.com/auth/gmail.readonly` (trigger)
-- `https://www.googleapis.com/auth/gmail.send` (send)
-
-**Sécurité :**
-- Les tokens OAuth sont chiffrés en base (Fernet). Voir [SECURITY.md](SECURITY.md).
-- Le refresh token n'est jamais exposé dans les réponses API.
-- Révocation possible via `DELETE /credentials/{id}`.
+Le compte Google et l'usage reel de Gmail ne sont valides qu'apres un consentement avec des identifiants OAuth configures.
 
 ---
 
@@ -317,51 +252,22 @@ Reçoit des messages envoyés au bot Telegram configuré.
 
 ---
 
-## ML Prediction ⬜
+## ML Prediction
 
-Appelle le service externe `flowforge-ml` pour effectuer une prédiction.
+Le noeud appelle POST {FLOWFORGE_ML_URL}/predict. Par defaut,
+FLOWFORGE_ML_URL=http://localhost:8001 quand les deux services tournent sur la
+meme machine. Le timeout est de 15 secondes et peut etre regle par
+timeout_seconds jusqu'a 60 secondes.
 
-**Config du nœud :**
-```json
-{
-  "type": "ml_prediction",
-  "config": {
-    "model_id": "sentiment_analysis_v1",
-    "input": {
-      "text": "{{gmail_trigger.body_text}}"
-    },
-    "timeout_seconds": 15
-  }
-}
-```
+La configuration exige model_id et input. Le modele disponible est
+breast_cancer_logistic_regression et attend exactement ses 30 caracteristiques
+numeriques, listees par GET /models. La sortie contient prediction, confidence,
+raw_output (probabilites par label), model_id et duration_ms.
 
-**Output :**
-```json
-{
-  "model_id": "sentiment_analysis_v1",
-  "prediction": "positive",
-  "confidence": 0.94,
-  "raw_output": { "positive": 0.94, "negative": 0.04, "neutral": 0.02 },
-  "duration_ms": 340
-}
-```
-
-**Variable d'environnement requise :** `FLOWFORGE_ML_URL`
-
-**Contrat API flowforge-ml (prévu) :**
-```
-POST {FLOWFORGE_ML_URL}/predict
-{
-  "model_id": "...",
-  "input": { ... }
-}
-→ 200 { "prediction": ..., "confidence": ..., "raw_output": { ... } }
-```
-
-**Sécurité :**
-- Communication interne uniquement (pas d'exposition publique de `flowforge-ml`).
-- Timeout strict (15s par défaut) pour éviter les blocages du worker.
-- Pas de validation du contenu des prédictions (responsabilité de flowforge-ml).
+Les erreurs HTTP, le JSON invalide, les entrees refusees (422), un modele absent
+(503), un timeout ou une erreur de connexion font echouer le noeud. Le runner
+marque le workflow failed et ses descendants skipped. Aucune prediction de
+remplacement n'est produite. Voir docs/ML_PREDICTION.md.
 
 ---
 

@@ -401,34 +401,26 @@ Annule une exécution en cours.
 
 ## Endpoints Triggers
 
-### `POST /webhooks/{webhook_token}` ⬜ (public)
+### `POST /webhooks/{token}` (public)
 
-Endpoint public pour déclencher un workflow via webhook. Le `webhook_token` est un token unique associé au workflow lors de sa configuration.
+D?clenche un workflow actif associ? au token secret. Le corps JSON est transmis comme `input_data` ? l'ex?cution. Un corps non objet est envelopp? dans `{ "data": ... }`; un corps non JSON devient `{}`.
 
-**Corps de la requête :** Payload libre (transmis comme `input_data` au workflow).
+**R?ponse 202 :** `execution_id`, `status`, `workflow_id`, `created_at`.
 
-**Réponse 202 :**
-```json
-{ "execution_id": "exec_abc123", "status": "queued" }
-```
-
-**Erreurs :**
-- `404` : token inconnu ou workflow inactif
-- `429` : trop de requêtes (rate limiting prévu)
+**Erreurs :** `404` token inconnu, `409` workflow inactif.
 
 ---
 
-### `GET /workflows/{workflow_id}/webhook-url` ⬜ 🔒
+### `GET /workflows/{workflow_id}/webhook-url` (authentifi?, propri?taire uniquement)
 
-Retourne l'URL de webhook associée au workflow.
+Retourne le chemin relatif ? la base API configur?e. Le token est une capacit? secr?te : garder cette URL priv?e.
 
-**Réponse 200 :**
+**R?ponse 200 :**
 ```json
-{
-  "webhook_url": "https://api.flowforge.ai/webhooks/abc123def456",
-  "token": "abc123def456"
-}
+{ "webhook_path": "webhooks/<uuid-v4>" }
 ```
+
+**Erreurs :** `401` authentification manquante/invalide, `404` workflow absent ou appartenant ? un autre utilisateur, ou sans trigger Webhook.
 
 ---
 
@@ -486,7 +478,7 @@ Enregistre un credential externe (chiffré avant persistance).
 }
 ```
 
-Types supportés : `api_key`, `oauth2_google`, `telegram_bot`, `http_header`.
+Types supportes : `api_key`, `oauth2_google`, `telegram_bot`, `http_header`. Pour HTTP Request, `api_key` attend `data: {"api_key":"<secret>"}`; `http_header` attend une carte de headers, par exemple `data: {"X-API-Key":"<secret>"}`. Les secrets sont chiffres en base et absents des reponses de l API.
 
 **Réponse 201 :**
 ```json
@@ -522,6 +514,22 @@ Liste les credentials de l'utilisateur (sans les valeurs secrètes).
 Supprime un credential.
 
 **Réponse 204** : No Content.
+
+---
+
+## Google OAuth et Gmail
+
+### `GET /integrations/google/auth-url` (authentifie)
+
+Cree un state signe et a usage unique, puis renvoie `{"authorization_url":"https://accounts.google.com/..."}`. Le client doit ouvrir cette URL dans une popup. Retourne `503` si `GOOGLE_CLIENT_ID` ou `GOOGLE_CLIENT_SECRET` manque.
+
+### `GET /integrations/google/callback` (retour Google)
+
+Recoit le `code` et le `state` signes. Le backend consomme le nonce, echange le code et stocke les tokens dans un credential chiffre. La page popup communique uniquement le statut `connected`, `denied` ou `error` a l'origine configuree par `FRONTEND_URL`; aucun token OAuth n'est retourne au navigateur.
+
+L'ancien `GET /integrations/google/auth` garde sa redirection directe. La SPA utilise `auth-url` pour transmettre le Bearer avant d'ouvrir la popup.
+
+Variables de configuration : `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `FRONTEND_URL`.
 
 ---
 

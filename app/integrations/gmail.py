@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import email.utils
+import logging
 from email.message import EmailMessage
 from typing import Any
 
@@ -13,6 +14,25 @@ from app.engine.node_executor import NodeExecutionError
 
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+logger = logging.getLogger(__name__)
+
+
+def _safe_oauth_error_code(response: httpx.Response) -> str:
+    """Extract only a provider error identifier; never log response bodies or tokens."""
+    try:
+        value = response.json().get("error")
+    except (ValueError, AttributeError):
+        return "unknown"
+    if isinstance(value, str) and value in {
+        "invalid_client",
+        "invalid_grant",
+        "invalid_request",
+        "invalid_scope",
+        "unauthorized_client",
+        "unsupported_grant_type",
+    }:
+        return value
+    return "unknown"
 
 
 def exchange_code(code: str, settings: Any) -> dict[str, Any]:
@@ -28,6 +48,11 @@ def exchange_code(code: str, settings: Any) -> dict[str, Any]:
         timeout=15,
     )
     if response.is_error:
+        logger.warning(
+            "Google OAuth authorization-code exchange rejected (HTTP %s, error=%s)",
+            response.status_code,
+            _safe_oauth_error_code(response),
+        )
         raise NodeExecutionError("Google OAuth token exchange failed")
     return response.json()
 

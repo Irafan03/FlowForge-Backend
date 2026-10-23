@@ -18,6 +18,7 @@ import uuid
 from typing import Any
 
 from arq.connections import RedisSettings
+from arq.cron import cron
 
 from app.config.settings import get_settings
 
@@ -105,16 +106,10 @@ class WorkerSettings:
 
     # Cron: fire_schedules every minute
     cron_jobs = [
-        {
-            "coroutine": fire_schedules,
-            "minute": {i for i in range(60)},  # every minute
-        }
+        cron(fire_schedules, minute=set(range(60))),  # every minute
     ]
 
-    @staticmethod
-    def redis_settings() -> RedisSettings:
-        settings = get_settings()
-        return RedisSettings.from_dsn(settings.REDIS_URL)
+    redis_settings = RedisSettings.from_dsn(get_settings().REDIS_URL)
 
     # Retry failed jobs up to 3 times with exponential back-off
     max_jobs = 10

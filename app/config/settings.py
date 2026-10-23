@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/google/callback"
+    FRONTEND_URL: str = "http://localhost:5173"
 
     TELEGRAM_BOT_TOKEN: str = ""
 
