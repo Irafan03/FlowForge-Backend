@@ -1,5 +1,7 @@
 # Rapport de cohérence — Documentation, Code et Tests
 
+> ⚠️ **RAPPORT HISTORIQUE, OBSOLÈTE.** Ce document décrit l’état du dépôt au moment de sa rédaction. Depuis, le backend, les migrations, les tests, le Dockerfile et `docker-compose.yml` ont été ajoutés. Les constats ci-dessous disant que ces éléments n’existent pas ne décrivent plus l’état actuel. Consultez le code dans `app/`, `migrations/` et `tests/`, ainsi que le [README](../README.md), pour l’état présent.
+
 **Date :** 16 octobre 2026
 **Analyste :** Architecte Backend Senior / Technical Writer
 **Repository :** `flowforge-backend`
