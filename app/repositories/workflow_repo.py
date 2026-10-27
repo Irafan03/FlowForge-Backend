@@ -127,7 +127,7 @@ def _sync_poll_trigger(db: Session, workflow: Workflow, graph: dict[str, Any]) -
     trigger_type = TriggerType(node["type"])
     config = dict(node.get("config") or {})
     if trigger_type == TriggerType.TELEGRAM:
-        config.setdefault("polling_interval_seconds", 60)
+        config.setdefault("polling_interval_seconds", 1)
     cron_expression = timezone_name = None
     next_run_at = None
     webhook_token = None

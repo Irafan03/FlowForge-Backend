@@ -186,6 +186,25 @@ def _handle_ml_prediction(
     return execute_ml_prediction(config)
 
 
+def _handle_ai_agent(
+    node: dict, config: dict, context: ExecutionContext
+) -> dict[str, Any]:
+    """Send a workflow prompt to the configured Ollama chat model."""
+    from app.integrations.ollama_agent import execute_ai_agent
+
+    return execute_ai_agent(config)
+
+
+def _handle_google_sheets_append(
+    node: dict, config: dict, context: ExecutionContext
+) -> dict[str, Any]:
+    """Append one resolved row to an owner-authorized Google spreadsheet."""
+    from app.integrations.google_sheets import append_row
+
+    _, token = _google_token(config, context)
+    return append_row(config, token)
+
+
 def _handle_gmail_trigger(
     node: dict, config: dict, context: ExecutionContext
 ) -> dict[str, Any]:
@@ -222,6 +241,8 @@ _HANDLERS: dict[str, Any] = {
     "gmail_send": _handle_gmail_send,
     "telegram_send": _handle_telegram_send,
     "ml_prediction": _handle_ml_prediction,
+    "ai_agent": _handle_ai_agent,
+    "google_sheets_append": _handle_google_sheets_append,
 }
 
 

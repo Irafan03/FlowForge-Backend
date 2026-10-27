@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""
 
     FLOWFORGE_ML_URL: str = "http://localhost:8001"
+    OLLAMA_API_KEY: str = ""
+    OLLAMA_BASE_URL: str = "https://ollama.com"
+    OLLAMA_MODEL: str = "gemma4:31b"
 
     # ── App ───────────────────────────────────────────────────────────────────
     LOG_LEVEL: str = "INFO"

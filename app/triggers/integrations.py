@@ -102,7 +102,7 @@ async def _poll_gmail(db: Session, trigger: Trigger, workflow: Any, config: dict
 
 
 async def _poll_telegram(db: Session, trigger: Trigger, workflow: Any, config: dict) -> int:
-    interval = max(30, int(config.get("polling_interval_seconds", 60)))
+    interval = max(1, int(config.get("polling_interval_seconds", 1)))
     last_polled = config.get("last_polled_at")
     if last_polled:
         try:

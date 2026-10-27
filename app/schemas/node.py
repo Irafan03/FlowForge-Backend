@@ -15,6 +15,8 @@ NODE_TYPES = Literal[
     "gmail_send",
     "telegram_send",
     "ml_prediction",
+    "ai_agent",
+    "google_sheets_append",
 ]
 
 

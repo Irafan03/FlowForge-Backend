@@ -33,6 +33,8 @@ REQUIRED_CONFIG: dict[str, list[str]] = {
     "gmail_send": ["credential_id", "to", "subject"],
     "telegram_send": ["credential_id", "chat_id", "text"],
     "ml_prediction": ["model_id", "input"],
+    "ai_agent": ["prompt"],
+    "google_sheets_append": ["credential_id", "spreadsheet_id", "range", "values"],
     "manual_trigger": [],
     "webhook_trigger": [],
     "schedule_trigger": [],
@@ -150,11 +152,11 @@ def _validate_telegram_trigger_config(node_id: str, config: dict[str, Any]) -> N
     if len(normalized_ids) != len(set(normalized_ids)):
         _fail(f"Telegram trigger node '{node_id}' has duplicate values in 'allowed_chat_ids'")
 
-    interval = config.get("polling_interval_seconds", 60)
-    if isinstance(interval, bool) or not isinstance(interval, int) or not 30 <= interval <= 3600:
+    interval = config.get("polling_interval_seconds", 1)
+    if isinstance(interval, bool) or not isinstance(interval, int) or not 1 <= interval <= 3600:
         _fail(
             f"Telegram trigger node '{node_id}' has invalid 'polling_interval_seconds'; "
-            "expected an integer from 30 to 3600 seconds"
+            "expected an integer from 1 to 3600 seconds"
         )
 
 

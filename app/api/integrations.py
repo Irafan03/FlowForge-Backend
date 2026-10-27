@@ -20,7 +20,11 @@ from app.services.credential_service import encrypt_data
 
 router = APIRouter(prefix="/integrations/google", tags=["integrations"])
 logger = logging.getLogger(__name__)
-_SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send"
+_SCOPES = (
+    "https://www.googleapis.com/auth/gmail.readonly "
+    "https://www.googleapis.com/auth/gmail.send "
+    "https://www.googleapis.com/auth/spreadsheets"
+)
 
 
 def _serializer() -> URLSafeTimedSerializer:
@@ -130,7 +134,7 @@ def google_callback(
         credential_repo.create(
             db,
             user_id=user_id,
-            name="Google Gmail",
+            name="Google Gmail + Sheets",
             type="oauth2_google",
             encrypted_data=encrypt_data(tokens),
         )

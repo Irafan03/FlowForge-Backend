@@ -58,7 +58,7 @@ async def run_execution(ctx: dict[str, Any], execution_id: str) -> None:
 
 async def fire_schedules(ctx: dict[str, Any]) -> None:
     """
-    ARQ cron task: runs every 60 seconds, finds due schedule triggers and
+    ARQ cron task: runs every second, finds due schedule triggers and
     enqueues their executions.
     """
     from sqlalchemy import create_engine
@@ -104,9 +104,9 @@ class WorkerSettings:
 
     functions = [run_execution]
 
-    # Cron: fire_schedules every minute
+    # Check Telegram updates frequently for near-immediate replies.
     cron_jobs = [
-        cron(fire_schedules, minute=set(range(60))),  # every minute
+        cron(fire_schedules, second=set(range(60))),  # every second
     ]
 
     redis_settings = RedisSettings.from_dsn(get_settings().REDIS_URL)

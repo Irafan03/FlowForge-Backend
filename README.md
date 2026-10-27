@@ -117,6 +117,9 @@ Voir `.env.example` pour les valeurs par défaut de développement.
 
 ## Documentation
 
+- [AI Agent with Ollama](docs/OLLAMA_AGENT.md)
+- [Google Sheets workflow action](docs/GOOGLE_SHEETS.md)
+
 - [Architecture](docs/ARCHITECTURE.md)
 - [API](docs/API.md)
 - [Moteur de workflows](docs/WORKFLOW_ENGINE.md)
